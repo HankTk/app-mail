@@ -1,0 +1,90 @@
+{
+  "name": "app-mail",
+  "version": "0.0.0",
+  "description": "A mail client application built with Angular and Electron",
+  "author": "Hidenori Takaku",
+  "main": "electron/main.js",
+  "scripts": {
+    "ng": "ng",
+    "start": "ng serve",
+    "build": "ng build",
+    "watch": "ng build --watch --configuration development",
+    "test": "ng test",
+    "electron": "electron .",
+    "electron-dev": "concurrently \"npm run start\" \"wait-on http://localhost:4200 && electron .\"",
+    "build-electron": "ng build --configuration production && electron-builder",
+    "dist": "npm run build && electron-builder"
+  },
+  "prettier": {
+    "printWidth": 100,
+    "singleQuote": true,
+    "overrides": [
+      {
+        "files": "*.html",
+        "options": {
+          "parser": "angular"
+        }
+      }
+    ]
+  },
+  "private": true,
+  "dependencies": {
+    "@angular/animations": "^20.3.0",
+    "@angular/common": "^20.3.0",
+    "@angular/compiler": "^20.3.0",
+    "@angular/core": "^20.3.0",
+    "@angular/forms": "^20.3.0",
+    "@angular/material": "^20.2.14",
+    "@angular/platform-browser": "^20.3.0",
+    "@angular/platform-browser-dynamic": "^20.3.0",
+    "@angular/router": "^20.3.0",
+    "imap": "^0.8.19",
+    "mailparser": "^3.6.5",
+    "nodemailer": "^6.9.15",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.3.0",
+    "zone.js": "~0.15.0"
+  },
+  "devDependencies": {
+    "@angular/build": "^20.3.5",
+    "@angular/cli": "^20.3.5",
+    "@angular/compiler-cli": "^20.3.0",
+    "@types/imap": "^0.8.40",
+    "@types/jasmine": "~5.1.0",
+    "@types/node": "^22.10.5",
+    "@types/nodemailer": "^6.4.14",
+    "concurrently": "^9.2.1",
+    "electron": "^38.2.2",
+    "electron-builder": "^26.0.12",
+    "jasmine-core": "~5.9.0",
+    "karma": "~6.4.0",
+    "karma-chrome-launcher": "~3.2.0",
+    "karma-coverage": "~2.2.0",
+    "karma-jasmine": "~5.1.0",
+    "karma-jasmine-html-reporter": "~2.1.0",
+    "typescript": "~5.9.2",
+    "wait-on": "^9.0.1"
+  },
+  "build": {
+    "appId": "com.appmail.app",
+    "productName": "App Mail",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/app-mail/**/*",
+      "electron/**/*",
+      "node_modules/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}
+
