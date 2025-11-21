@@ -144,10 +144,21 @@ ipcMain.handle('fetch-emails', async (event, accountId, folder = 'INBOX') => {
       host: account.imap.host,
       port: account.imap.port || 993,
       tls: account.imap.tls !== false,
-      tlsOptions: { rejectUnauthorized: false }
+      tlsOptions: { rejectUnauthorized: false },
+      connTimeout: 60000, // 接続タイムアウト: 60秒
+      authTimeout: 30000  // 認証タイムアウト: 30秒
     });
 
+    // 接続タイムアウトのハンドリング
+    const connectionTimeout = setTimeout(() => {
+      if (!imap._socket || !imap._socket.readyState || imap._socket.readyState !== 'open') {
+        imap.end();
+        reject(new Error('IMAP接続がタイムアウトしました。サーバーに接続できません。'));
+      }
+    }, 60000);
+
     imap.once('ready', () => {
+      clearTimeout(connectionTimeout);
       imap.openBox(folder, false, (err, box) => {
         if (err) {
           imap.end();
@@ -231,10 +242,21 @@ ipcMain.handle('fetch-emails', async (event, accountId, folder = 'INBOX') => {
     });
 
     imap.once('error', (err) => {
+      clearTimeout(connectionTimeout);
+      console.error('IMAP connection error:', err);
       reject(err);
     });
 
-    imap.connect();
+    imap.once('end', () => {
+      clearTimeout(connectionTimeout);
+    });
+
+    try {
+      imap.connect();
+    } catch (err) {
+      clearTimeout(connectionTimeout);
+      reject(err);
+    }
   });
 });
 
@@ -253,10 +275,21 @@ ipcMain.handle('get-folders', async (event, accountId) => {
       host: account.imap.host,
       port: account.imap.port || 993,
       tls: account.imap.tls !== false,
-      tlsOptions: { rejectUnauthorized: false }
+      tlsOptions: { rejectUnauthorized: false },
+      connTimeout: 60000, // 接続タイムアウト: 60秒
+      authTimeout: 30000  // 認証タイムアウト: 30秒
     });
 
+    // 接続タイムアウトのハンドリング
+    const connectionTimeout = setTimeout(() => {
+      if (!imap._socket || !imap._socket.readyState || imap._socket.readyState !== 'open') {
+        imap.end();
+        reject(new Error('IMAP接続がタイムアウトしました。サーバーに接続できません。'));
+      }
+    }, 60000);
+
     imap.once('ready', () => {
+      clearTimeout(connectionTimeout);
       imap.getBoxes((err, boxes) => {
         if (err) {
           imap.end();
@@ -283,10 +316,21 @@ ipcMain.handle('get-folders', async (event, accountId) => {
     });
 
     imap.once('error', (err) => {
+      clearTimeout(connectionTimeout);
+      console.error('IMAP connection error:', err);
       reject(err);
     });
 
-    imap.connect();
+    imap.once('end', () => {
+      clearTimeout(connectionTimeout);
+    });
+
+    try {
+      imap.connect();
+    } catch (err) {
+      clearTimeout(connectionTimeout);
+      reject(err);
+    }
   });
 });
 
@@ -307,10 +351,21 @@ ipcMain.handle('delete-email', async (event, accountId, folder, emailUid) => {
       host: account.imap.host,
       port: account.imap.port || 993,
       tls: account.imap.tls !== false,
-      tlsOptions: { rejectUnauthorized: false }
+      tlsOptions: { rejectUnauthorized: false },
+      connTimeout: 60000, // 接続タイムアウト: 60秒
+      authTimeout: 30000  // 認証タイムアウト: 30秒
     });
 
+    // 接続タイムアウトのハンドリング
+    const connectionTimeout = setTimeout(() => {
+      if (!imap._socket || !imap._socket.readyState || imap._socket.readyState !== 'open') {
+        imap.end();
+        reject(new Error('IMAP接続がタイムアウトしました。サーバーに接続できません。'));
+      }
+    }, 60000);
+
     imap.once('ready', () => {
+      clearTimeout(connectionTimeout);
       imap.openBox(folder, false, (err, box) => {
         if (err) {
           console.error('Error opening box:', err);
@@ -360,11 +415,21 @@ ipcMain.handle('delete-email', async (event, accountId, folder, emailUid) => {
     });
 
     imap.once('error', (err) => {
+      clearTimeout(connectionTimeout);
       console.error('IMAP error:', err);
       reject(err);
     });
 
-    imap.connect();
+    imap.once('end', () => {
+      clearTimeout(connectionTimeout);
+    });
+
+    try {
+      imap.connect();
+    } catch (err) {
+      clearTimeout(connectionTimeout);
+      reject(err);
+    }
   });
 });
 
