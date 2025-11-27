@@ -1,4 +1,5 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, HostListener, ViewChild, ElementRef } from '@angular/core';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { CommonModule } from '@angular/common';
 import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatListModule } from '@angular/material/list';
@@ -155,7 +156,12 @@ import { ComposeEmailDialogComponent } from '../compose-email-dialog/compose-ema
               </div>
             </div>
             <div class="email-body-wrapper">
-              <div class="email-body" [innerHTML]="sanitizedEmailContent"></div>
+              <iframe [srcdoc]="sanitizedEmailContent" 
+                      class="email-iframe" 
+                      #emailIframe
+                      (load)="onIframeLoad()"
+                      [style.opacity]="isIframeLoading ? 0 : 1"
+                      scrolling="no"></iframe>
             </div>
           </div>
           <div *ngIf="!selectedEmail" class="no-email-selected">
@@ -655,9 +661,19 @@ import { ComposeEmailDialogComponent } from '../compose-email-dialog/compose-ema
       background: #1976d2;
       width: 5px;
     }
+
+    .email-iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: #fff;
+      transition: opacity 0.2s ease-in-out;
+      will-change: opacity;
+    }
   `]
 })
 export class MailViewComponent implements OnInit {
+  @ViewChild('emailIframe') emailIframe!: ElementRef<HTMLIFrameElement>;
   accounts: MailAccount[] = [];
   selectedAccountId: string | null = null;
   folders: string[] = [];
@@ -670,12 +686,16 @@ export class MailViewComponent implements OnInit {
   mailListWidth: number = 400;
   isResizing: boolean = false;
   filterText: string = '';
+  isIframeLoading: boolean = false;
+  private cachedEmailContent: SafeHtml = '';
+  private cachedEmailUid: number | null = null;
 
   constructor(
     private accountService: AccountService,
     private mailService: MailService,
-    private dialog: MatDialog
-  ) {}
+    private dialog: MatDialog,
+    private sanitizer: DomSanitizer
+  ) { }
 
   async ngOnInit() {
     await this.loadAccounts();
@@ -698,7 +718,7 @@ export class MailViewComponent implements OnInit {
 
   async loadFolders() {
     if (!this.selectedAccountId) return;
-    
+
     try {
       this.folders = await this.mailService.getFolders(this.selectedAccountId);
       this.applyFolderOrder();
@@ -718,21 +738,21 @@ export class MailViewComponent implements OnInit {
       // 保存された順序を適用
       const ordered: string[] = [];
       const unordered: string[] = [];
-      
+
       // 保存された順序に従って追加
       account.folderOrder.forEach(folder => {
         if (this.folders.includes(folder)) {
           ordered.push(folder);
         }
       });
-      
+
       // 順序が保存されていないフォルダーを追加
       this.folders.forEach(folder => {
         if (!ordered.includes(folder)) {
           unordered.push(folder);
         }
       });
-      
+
       this.sortedFolders = [...ordered, ...unordered];
     } else {
       // 順序が保存されていない場合は元の順序を使用
@@ -747,7 +767,7 @@ export class MailViewComponent implements OnInit {
 
   async saveFolderOrder() {
     if (!this.selectedAccountId) return;
-    
+
     const account = this.accounts.find(a => a.id === this.selectedAccountId);
     if (account) {
       account.folderOrder = [...this.sortedFolders];
@@ -797,10 +817,10 @@ export class MailViewComponent implements OnInit {
       const subject = (email.subject || '').toLowerCase();
       const from = this.getDisplayName(email.from).toLowerCase();
       const fromOriginal = (email.from || '').toLowerCase();
-      
-      return subject.includes(searchText) || 
-             from.includes(searchText) || 
-             fromOriginal.includes(searchText);
+
+      return subject.includes(searchText) ||
+        from.includes(searchText) ||
+        fromOriginal.includes(searchText);
     });
   }
 
@@ -814,21 +834,44 @@ export class MailViewComponent implements OnInit {
   }
 
   selectEmail(email: Email) {
+    // 同じメールを選択した場合は何もしない（フリッカー防止）
+    if (this.selectedEmail && this.selectedEmail.uid === email.uid) {
+      return;
+    }
+    
     this.selectedEmail = email;
-    // メールコンテンツを更新
+    this.isIframeLoading = true;
+    // メールコンテンツを更新（キャッシュをクリア）
     this.updateSanitizedContent();
   }
 
-  get sanitizedEmailContent(): string {
+  onIframeLoad() {
+    // iframeがロードされたら表示
+    this.isIframeLoading = false;
+  }
+
+  get sanitizedEmailContent(): SafeHtml {
     if (!this.selectedEmail) {
+      this.cachedEmailContent = '';
+      this.cachedEmailUid = null;
       return '';
     }
-    return this.getEmailContent(this.selectedEmail);
+    
+    // 同じメールの場合はキャッシュを返す
+    if (this.cachedEmailUid === this.selectedEmail.uid && this.cachedEmailContent) {
+      return this.cachedEmailContent;
+    }
+    
+    // 新しいメールの場合はコンテンツを生成してキャッシュ
+    this.cachedEmailContent = this.getEmailContent(this.selectedEmail);
+    this.cachedEmailUid = this.selectedEmail.uid;
+    return this.cachedEmailContent;
   }
 
   updateSanitizedContent() {
-    // このメソッドは、メールが選択されたときに呼び出される
-    // 必要に応じて、ここで追加の処理を行う
+    // キャッシュをクリアして、次回のアクセス時に再生成されるようにする
+    this.cachedEmailContent = '';
+    this.cachedEmailUid = null;
   }
 
   formatDate(dateString: string): string {
@@ -867,65 +910,116 @@ export class MailViewComponent implements OnInit {
 
     // その他の形式の場合、< >で囲まれた部分を削除
     let displayName = from.replace(/<[^>]+>/g, '').trim();
-    // ダブルクオートを削除
     displayName = displayName.replace(/^"|"$/g, '');
-    
     return displayName || from;
   }
 
-  getEmailContent(email: Email): string {
-    // HTMLが存在する場合はHTMLを優先、なければテキストを使用
+  @HostListener('window:message', ['$event'])
+  onMessage(event: MessageEvent) {
+    if (event.data && event.data.type === 'email-resize') {
+      const height = event.data.height;
+      if (this.emailIframe && this.emailIframe.nativeElement) {
+        // 高さが実際に変わった場合のみ更新（フリッカー防止）
+        const currentHeight = parseInt(this.emailIframe.nativeElement.style.height) || 0;
+        const newHeight = height + 20;
+        if (Math.abs(currentHeight - newHeight) > 5) {
+          this.emailIframe.nativeElement.style.height = newHeight + 'px';
+        }
+        this.isIframeLoading = false;
+      }
+    }
+  }
+
+  getEmailContent(email: Email): SafeHtml {
     let content = email.html || email.body || '';
-    
+
     if (!content) {
       return '';
     }
 
-    // HTMLコンテンツが完全なHTMLドキュメントを含んでいる場合、<body>タグの内容だけを抽出
-    if (email.html) {
-      // まず、<!DOCTYPE>やコメントを削除
-      content = content.replace(/<!DOCTYPE[^>]*>/gi, '');
-      content = content.replace(/<!--[\s\S]*?-->/g, '');
-      
-      // <body>タグの内容を抽出（最初の<body>タグのみ）
-      // ネストされた<body>タグを処理するため、最初の<body>から最初の</body>までを抽出
-      let bodyStart = content.indexOf('<body');
-      if (bodyStart !== -1) {
-        // <body>タグの開始位置を見つける
-        bodyStart = content.indexOf('>', bodyStart) + 1;
-        // 最初の</body>タグの位置を見つける（ネストされた<body>タグを考慮）
-        let bodyEnd = content.indexOf('</body>', bodyStart);
-        if (bodyEnd !== -1) {
-          // 抽出したコンテンツ内にさらに<body>タグがないか確認
-          let extracted = content.substring(bodyStart, bodyEnd);
-          // ネストされた<body>タグを削除
-          extracted = extracted.replace(/<body[^>]*>/gi, '');
-          extracted = extracted.replace(/<\/body>/gi, '');
-          content = extracted.trim();
-        } else {
-          // </body>タグがない場合、<body>タグ以降のすべてを使用
-          content = content.substring(bodyStart).trim();
-          // ネストされた<body>タグを削除
-          content = content.replace(/<body[^>]*>/gi, '');
-          content = content.replace(/<\/body>/gi, '');
-        }
-      } else if (content.includes('<html')) {
-        // <html>タグが含まれているが<body>タグがない場合、<html>タグと<head>タグを削除
-        // <head>タグとその内容を削除
-        content = content.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '');
-        // <html>タグと</html>タグを削除
-        content = content.replace(/<\/?html[^>]*>/gi, '');
-        content = content.trim();
+    // 基本的なHTML構造がない場合はラップする
+    if (!content.includes('<html') && !content.includes('<body')) {
+      // テキストのみの場合は改行を<br>に変換
+      if (!email.html && email.body) {
+        content = content.replace(/\n/g, '<br>');
       }
-      
-      // デバッグ: メールコンテンツの長さと<body>タグの数を確認
-      const bodyTagCount = (content.match(/<body[^>]*>/gi) || []).length;
-      if (bodyTagCount > 0) {
-        console.warn('Warning: Found', bodyTagCount, 'body tags in email content');
+      content = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <style>
+              body { 
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                margin: 16px;
+                overflow-y: hidden; /* Prevent scrollbar inside iframe */
+              }
+              img { max-width: 100%; height: auto; }
+              a { color: #1976d2; }
+            </style>
+          </head>
+          <body>${content}</body>
+        </html>
+      `;
+    } else {
+      // 既存のHTMLにもスタイルを追加してスクロールバーを防ぐ
+      if (content.includes('</head>')) {
+        content = content.replace('</head>', `
+            <style>
+              body { overflow-y: hidden !important; }
+            </style>
+            </head>`);
       }
     }
 
-    return content;
+    // ResizeObserverスクリプトを注入（デバウンス付き）
+    const script = `
+      <script>
+        let resizeTimeout;
+        let lastHeight = 0;
+        
+        function sendHeight() {
+          const height = document.body.scrollHeight;
+          // 高さが実際に変わった場合のみ送信（フリッカー防止）
+          if (Math.abs(height - lastHeight) > 5) {
+            lastHeight = height;
+            window.parent.postMessage({ type: 'email-resize', height: height }, '*');
+          }
+        }
+
+        function debouncedSendHeight() {
+          clearTimeout(resizeTimeout);
+          resizeTimeout = setTimeout(sendHeight, 100);
+        }
+
+        // ResizeObserverで監視（デバウンス付き）
+        const resizeObserver = new ResizeObserver(() => {
+          debouncedSendHeight();
+        });
+
+        // ロード完了時に送信し、監視を開始
+        window.addEventListener('load', () => {
+            sendHeight();
+            resizeObserver.observe(document.body);
+        });
+        
+        // DOMContentLoadedでも送信（早期表示）
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', sendHeight);
+        } else {
+          sendHeight();
+        }
+      </script>
+    `;
+
+    if (content.includes('</body>')) {
+      content = content.replace('</body>', script + '</body>');
+    } else {
+      content += script;
+    }
+
+    return this.sanitizer.bypassSecurityTrustHtml(content);
   }
 
   composeEmail() {
@@ -945,14 +1039,14 @@ export class MailViewComponent implements OnInit {
   startResize(event: MouseEvent) {
     event.preventDefault();
     event.stopPropagation();
-    
+
     this.isResizing = true;
     const startX = event.pageX;
     const startWidth = this.mailListWidth;
 
     const doResize = (e: MouseEvent) => {
       if (!this.isResizing) return;
-      
+
       const diff = e.pageX - startX;
       const newWidth = startWidth + diff;
       // 最小幅300px、最大幅800px
